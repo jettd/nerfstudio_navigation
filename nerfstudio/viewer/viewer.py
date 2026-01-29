@@ -28,6 +28,8 @@ import viser
 import viser.theme
 import viser.transforms as vtf
 from typing_extensions import assert_never
+from flask import Flask, jsonify
+from flask_cors import CORS
 
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer
 from nerfstudio.cameras.cameras import CameraType
@@ -129,6 +131,40 @@ class Viewer:
             self.viewer_info = [f"Viewer running locally at: http://localhost:{websocket_port} (listening on 0.0.0.0)"]
         else:
             self.viewer_info = [f"Viewer running locally at: http://{config.websocket_host}:{websocket_port}"]
+
+        # Initialize telemetry HTTP server
+        self.telemetry_port = websocket_port + 1000
+        self.telemetry_app = Flask("nerfstudio_telemetry")
+        CORS(self.telemetry_app)  # Allow cross-origin requests from Harvest
+
+        @self.telemetry_app.route("/telemetry", methods=["GET"])
+        def get_telemetry():
+            clients_data = []
+            clients = self.viser_server.get_clients()
+            for client_id, client in clients.items():
+                clients_data.append({
+                    "client_id": client_id,
+                    "position": client.camera.position.tolist(),
+                    "wxyz": client.camera.wxyz.tolist(),
+                    "fov": float(client.camera.fov),
+                    "aspect": float(client.camera.aspect),
+                })
+            return jsonify({"clients": clients_data})
+
+        # Start telemetry server in background thread
+        def run_telemetry_server():
+            self.telemetry_app.run(
+                host=config.websocket_host,
+                port=self.telemetry_port,
+                debug=False,
+                use_reloader=False,
+                threaded=True
+            )
+
+        self.telemetry_thread = threading.Thread(target=run_telemetry_server, daemon=True)
+        self.telemetry_thread.start()
+
+        print(f"Telemetry server running at: http://{config.websocket_host}:{self.telemetry_port}/telemetry")
 
         buttons = (
             viser.theme.TitlebarButton(

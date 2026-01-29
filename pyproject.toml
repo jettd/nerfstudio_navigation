@@ -51,6 +51,8 @@ dependencies = [
     "newrawpy>=1.0.0b0; platform_machine == 'arm64'",
     "requests",
     "rich>=12.5.1",
+    "flask>=2.3.0",
+    "flask-cors>=4.0.0",
     "scikit-image>=0.19.3",
     "splines==0.3.0",
     "tensorboard>=2.13.0",
