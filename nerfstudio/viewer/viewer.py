@@ -151,6 +151,37 @@ class Viewer:
                 })
             return jsonify({"clients": clients_data})
 
+        @self.telemetry_app.route("/teleport", methods=["POST"])
+        def teleport_camera():
+            from flask import request
+            data = request.get_json()
+
+            if not data:
+                return jsonify({"error": "No JSON data provided"}), 400
+
+            position = data.get("position")
+            wxyz = data.get("wxyz")
+            fov = data.get("fov")
+            client_id = data.get("client_id", 0)  # Default to first client
+
+            if position is None or wxyz is None:
+                return jsonify({"error": "Missing position or wxyz"}), 400
+
+            clients = self.viser_server.get_clients()
+            if client_id not in clients:
+                return jsonify({"error": f"Client {client_id} not found"}), 404
+
+            client = clients[client_id]
+
+            # Set camera with atomic update
+            with client.atomic():
+                client.camera.position = tuple(position)
+                client.camera.wxyz = tuple(wxyz)
+                if fov is not None:
+                    client.camera.fov = float(fov)
+
+            return jsonify({"success": True, "client_id": client_id})
+
         # Start telemetry server in background thread
         def run_telemetry_server():
             self.telemetry_app.run(
