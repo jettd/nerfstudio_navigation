@@ -182,6 +182,28 @@ class Viewer:
 
             return jsonify({"success": True, "client_id": client_id})
 
+        @self.telemetry_app.route("/scene_bounds", methods=["GET"])
+        def get_scene_bounds():
+            try:
+                scene_box = self.pipeline.datamanager.train_dataset.scene_box
+                aabb = scene_box.aabb.cpu().numpy()
+
+                min_point = aabb[0].tolist()
+                max_point = aabb[1].tolist()
+                center = scene_box.get_center().cpu().numpy().tolist()
+                diagonal = float(scene_box.get_diagonal_length())
+
+                return jsonify({
+                    "min": min_point,
+                    "max": max_point,
+                    "center": center,
+                    "diagonal": diagonal
+                })
+            except AttributeError:
+                return jsonify({"error": "Scene box not available"}), 404
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
         # Start telemetry server in background thread
         def run_telemetry_server():
             self.telemetry_app.run(
