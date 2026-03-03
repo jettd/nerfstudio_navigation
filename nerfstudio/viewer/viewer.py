@@ -787,6 +787,46 @@ class Viewer:
             return self.pipeline_b.model
         return self.pipeline.model
 
+    def apply_model_b_transform(self, camera: Cameras) -> Cameras:
+        """Apply transform to camera for model_b coordinate alignment.
+
+        Transforms camera from viewer space to model_b's coordinate system.
+
+        Args:
+            camera: Camera in viewer coordinate system
+
+        Returns:
+            Camera transformed to model_b coordinate system
+        """
+        if self.compare_trans is None or self.compare_rot is None:
+            return camera
+
+        # Build 4x4 transform from UI values
+        trans = self.compare_trans.value
+        rot = self.compare_rot.value
+
+        R = torch.tensor(
+            vtf.SO3.from_rpy_radians(rot[0], rot[1], rot[2]).as_matrix(),
+            dtype=torch.float32,
+            device=camera.device,
+        )
+        T = torch.tensor(trans, dtype=torch.float32, device=camera.device)
+
+        H = torch.eye(4, dtype=torch.float32, device=camera.device)
+        H[:3, :3] = R
+        H[:3, 3] = T
+
+        # Transform camera_to_worlds: c2w_new = H @ c2w_old
+        c2w = camera.camera_to_worlds[0]  # [3, 4]
+        c2w_homogeneous = torch.cat(
+            [c2w, torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=camera.device)], dim=0
+        )  # [4, 4]
+
+        c2w_transformed = (H @ c2w_homogeneous)[:3, :]  # [3, 4]
+        camera.camera_to_worlds[0] = c2w_transformed
+
+        return camera
+
     def training_complete(self) -> None:
         """Called when training is complete."""
         self.training_state = "completed"

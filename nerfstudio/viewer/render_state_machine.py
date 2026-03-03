@@ -136,6 +136,11 @@ class RenderStateMachine(threading.Thread):
             camera_state.time = self.viewer.control_panel.time
         camera = get_camera(camera_state, image_height, image_width)
         camera = camera.to(self.viewer.get_model().device)
+
+        # Apply model_b transform in comparison mode
+        if self.viewer.active_pipeline_idx == 1 and self.viewer.pipeline_b is not None:
+            camera = self.viewer.apply_model_b_transform(camera)
+
         assert isinstance(camera, Cameras)
         assert camera is not None, "render called before viewer connected"
 
