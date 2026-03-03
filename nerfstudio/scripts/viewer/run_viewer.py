@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from threading import Lock
-from typing import Literal
+from typing import Literal, Optional
 
 import tyro
 
@@ -53,6 +53,8 @@ class RunViewer:
 
     load_config: Path
     """Path to config YAML file."""
+    compare_config: Optional[Path] = None
+    """Path to second config for comparison mode."""
     viewer: ViewerConfigWithoutNumRays = field(default_factory=ViewerConfigWithoutNumRays)
     """Viewer configuration"""
     vis: Literal["viewer", "viewer_legacy"] = "viewer"
@@ -65,13 +67,23 @@ class RunViewer:
             eval_num_rays_per_chunk=None,
             test_mode="test",
         )
+
+        # Load second pipeline for comparison mode
+        pipeline_b = None
+        if self.compare_config is not None:
+            _, pipeline_b, _, _ = eval_setup(
+                self.compare_config,
+                eval_num_rays_per_chunk=None,
+                test_mode="test",
+            )
+
         num_rays_per_chunk = config.viewer.num_rays_per_chunk
         assert self.viewer.num_rays_per_chunk == -1
         config.vis = self.vis
         config.viewer = self.viewer.as_viewer_config()
         config.viewer.num_rays_per_chunk = num_rays_per_chunk
 
-        _start_viewer(config, pipeline, step)
+        _start_viewer(config, pipeline, step, pipeline_b)
 
     def save_checkpoint(self, *args, **kwargs):
         """
@@ -79,13 +91,14 @@ class RunViewer:
         """
 
 
-def _start_viewer(config: TrainerConfig, pipeline: Pipeline, step: int):
+def _start_viewer(config: TrainerConfig, pipeline: Pipeline, step: int, pipeline_b: Optional[Pipeline] = None):
     """Starts the viewer
 
     Args:
         config: Configuration of pipeline to load
         pipeline: Pipeline instance of which to load weights
         step: Step at which the pipeline was saved
+        pipeline_b: Optional second pipeline for comparison mode
     """
     base_dir = config.get_base_dir()
     viewer_log_path = base_dir / config.viewer.relative_log_filename
@@ -107,6 +120,7 @@ def _start_viewer(config: TrainerConfig, pipeline: Pipeline, step: int):
             log_filename=viewer_log_path,
             datapath=pipeline.datamanager.get_datapath(),
             pipeline=pipeline,
+            pipeline_b=pipeline_b,
             share=config.viewer.make_share_url,
             train_lock=viewer_callback_lock,
         )

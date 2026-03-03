@@ -81,6 +81,7 @@ class Viewer:
         log_filename: Path,
         datapath: Path,
         pipeline: Pipeline,
+        pipeline_b: Optional[Pipeline] = None,
         trainer: Optional[Trainer] = None,
         train_lock: Optional[threading.Lock] = None,
         share: bool = False,
@@ -91,6 +92,8 @@ class Viewer:
         self.last_step = 0
         self.train_lock = train_lock
         self.pipeline = pipeline
+        self.pipeline_b = pipeline_b
+        self.active_pipeline_idx = 0  # 0 = pipeline, 1 = pipeline_b
         self.log_filename = log_filename
         self.datapath = datapath.parent if datapath.is_file() else datapath
         self.include_time = self.pipeline.datamanager.includes_time
