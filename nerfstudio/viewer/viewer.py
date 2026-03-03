@@ -439,12 +439,23 @@ class Viewer:
             self.viewer_controls: List[ViewerControl] = [
                 e for (_, e) in parse_object(pipeline, ViewerControl, "Custom Elements")
             ]
+
+            # Add comparison mode toggle button
+            if self.pipeline_b is not None:
+                self.compare_toggle = self.viser_server.gui.add_button(
+                    label="Switch to Model B",
+                    disabled=False,
+                    icon=viser.Icon.ARROWS_LEFT_RIGHT,
+                )
+                self.compare_toggle.on_click(lambda _: self._toggle_comparison_model())
+
         for c in self.viewer_controls:
             c._setup(self)
 
         # Diagnostics for Gaussian Splatting: where the points are at the start of training.
         # This is hidden by default, it can be shown from the Viser UI's scene tree table.
-        if isinstance(pipeline.model, SplatfactoModel):
+        # Skip in comparison mode to avoid showing stale data after model swap.
+        if isinstance(pipeline.model, SplatfactoModel) and self.pipeline_b is None:
             self.viser_server.scene.add_point_cloud(
                 "/gaussian_splatting_initial_points",
                 points=pipeline.model.means.numpy(force=True) * VISER_NERFSTUDIO_SCALE_RATIO,
@@ -462,6 +473,23 @@ class Viewer:
     def toggle_cameravis_button(self) -> None:
         self.hide_images.visible = not self.hide_images.visible
         self.show_images.visible = not self.show_images.visible
+
+    def _toggle_comparison_model(self) -> None:
+        """Toggle between model A and model B."""
+        if self.pipeline_b is None:
+            return
+
+        # Swap active index
+        self.active_pipeline_idx = 1 - self.active_pipeline_idx
+
+        # Update button label
+        if self.active_pipeline_idx == 0:
+            self.compare_toggle.label = "Switch to Model B"
+        else:
+            self.compare_toggle.label = "Switch to Model A"
+
+        # Trigger rerender for all clients
+        self._trigger_rerender()
 
     def make_stats_markdown(self, step: Optional[int], res: Optional[str]) -> str:
         # if either are None, read it from the current stats_markdown content
@@ -537,8 +565,9 @@ class Viewer:
         # TODO this fn accounts for like ~5% of total train time
         # Update the train camera locations based on optimization
         assert self.camera_handles is not None
-        if hasattr(self.pipeline.model, "camera_optimizer"):
-            camera_optimizer = self.pipeline.model.camera_optimizer
+        active_model = self.get_model()
+        if hasattr(active_model, "camera_optimizer"):
+            camera_optimizer = active_model.camera_optimizer
         else:
             return
         idxs = list(self.camera_handles.keys())
@@ -715,7 +744,9 @@ class Viewer:
             self.output_split_type_changed = False
 
     def get_model(self) -> Model:
-        """Returns the model."""
+        """Returns the active model."""
+        if self.active_pipeline_idx == 1 and self.pipeline_b is not None:
+            return self.pipeline_b.model
         return self.pipeline.model
 
     def training_complete(self) -> None:
