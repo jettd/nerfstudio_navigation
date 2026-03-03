@@ -45,7 +45,7 @@ from nerfstudio.viewer.export_panel import populate_export_tab
 from nerfstudio.viewer.render_panel import populate_render_tab
 from nerfstudio.viewer.render_state_machine import RenderAction, RenderStateMachine
 from nerfstudio.viewer.utils import CameraState, parse_object
-from nerfstudio.viewer.viewer_elements import ViewerControl, ViewerElement
+from nerfstudio.viewer.viewer_elements import ViewerControl, ViewerElement, ViewerVec3
 from nerfstudio.viewer_legacy.server import viewer_utils
 
 if TYPE_CHECKING:
@@ -94,6 +94,9 @@ class Viewer:
         self.pipeline = pipeline
         self.pipeline_b = pipeline_b
         self.active_pipeline_idx = 0  # 0 = pipeline, 1 = pipeline_b
+        self.compare_trans = None
+        self.compare_rot = None
+        self.compare_reset = None
         self.log_filename = log_filename
         self.datapath = datapath.parent if datapath.is_file() else datapath
         self.include_time = self.pipeline.datamanager.includes_time
@@ -449,6 +452,33 @@ class Viewer:
                 )
                 self.compare_toggle.on_click(lambda _: self._toggle_comparison_model())
 
+                # Add model alignment controls
+                with self.viser_server.gui.add_folder("Model B Alignment"):
+                    self.compare_trans = ViewerVec3(
+                        "Translation",
+                        (0.0, 0.0, 0.0),
+                        step=0.1,
+                        cb_hook=lambda _: self._trigger_rerender(),
+                        hint="Translate model B relative to model A (x, y, z in meters)",
+                    )
+                    self.compare_rot = ViewerVec3(
+                        "Rotation",
+                        (0.0, 0.0, 0.0),
+                        step=0.01,
+                        cb_hook=lambda _: self._trigger_rerender(),
+                        hint="Rotate model B in radians (roll, pitch, yaw)",
+                    )
+                    self.compare_reset = self.viser_server.gui.add_button(
+                        label="Reset Transform",
+                        disabled=False,
+                        icon=viser.Icon.ARROW_BACK_UP,
+                    )
+                    self.compare_reset.on_click(lambda _: self._reset_comparison_transform())
+
+                    # Install elements
+                    self.compare_trans.install(self.viser_server)
+                    self.compare_rot.install(self.viser_server)
+
         for c in self.viewer_controls:
             c._setup(self)
 
@@ -489,6 +519,14 @@ class Viewer:
             self.compare_toggle.label = "Switch to Model A"
 
         # Trigger rerender for all clients
+        self._trigger_rerender()
+
+    def _reset_comparison_transform(self) -> None:
+        """Reset model B alignment transform to zero."""
+        if self.compare_trans is not None:
+            self.compare_trans.value = (0.0, 0.0, 0.0)
+        if self.compare_rot is not None:
+            self.compare_rot.value = (0.0, 0.0, 0.0)
         self._trigger_rerender()
 
     def make_stats_markdown(self, step: Optional[int], res: Optional[str]) -> str:
