@@ -843,10 +843,13 @@ class Viewer:
         trans = self.compare_trans.value
         rot = self.compare_rot.value
 
+        # Match OBB's dtype and device
         R_transform = torch.tensor(
-            vtf.SO3.from_rpy_radians(rot[0], rot[1], rot[2]).as_matrix(), dtype=torch.float32
+            vtf.SO3.from_rpy_radians(rot[0], rot[1], rot[2]).as_matrix(),
+            dtype=obb.R.dtype,
+            device=obb.R.device,
         )
-        T_transform = torch.tensor(trans, dtype=torch.float32)
+        T_transform = torch.tensor(trans, dtype=obb.T.dtype, device=obb.T.device)
 
         # Transform OBB center
         T_new = R_transform @ obb.T + T_transform
