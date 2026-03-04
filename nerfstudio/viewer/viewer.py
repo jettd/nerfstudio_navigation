@@ -450,11 +450,14 @@ class Viewer:
             # Add comparison mode toggle button
             if self.pipeline_b is not None:
                 self.compare_toggle = self.viser_server.gui.add_button(
-                    label=f"Viewing: {self.experiment_name_a}",
+                    label="Swap Models",
                     disabled=False,
                     icon=viser.Icon.ARROWS_LEFT_RIGHT,
                 )
                 self.compare_toggle.on_click(lambda _: self._toggle_comparison_model())
+                self.compare_status = self.viser_server.gui.add_markdown(
+                    f"**Active Model:** {self.experiment_name_a}"
+                )
 
                 # Add model alignment controls
                 with self.viser_server.gui.add_folder("Model B Alignment"):
@@ -516,11 +519,11 @@ class Viewer:
         # Swap active index
         self.active_pipeline_idx = 1 - self.active_pipeline_idx
 
-        # Update button label to show current active model
+        # Update status to show current active model
         if self.active_pipeline_idx == 0:
-            self.compare_toggle.label = f"Viewing: {self.experiment_name_a}"
+            self.compare_status.content = f"**Active Model:** {self.experiment_name_a}"
         else:
-            self.compare_toggle.label = f"Viewing: {self.experiment_name_b}"
+            self.compare_status.content = f"**Active Model:** {self.experiment_name_b}"
 
         # Trigger rerender for all clients
         self._trigger_rerender()
