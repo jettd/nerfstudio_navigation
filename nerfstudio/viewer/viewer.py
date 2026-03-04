@@ -522,8 +522,18 @@ class Viewer:
         # Update status to show current active model
         if self.active_pipeline_idx == 0:
             self.compare_status.content = f"**Active Model:** {self.experiment_name_a}"
+            # Show model A cameras, hide model B cameras
+            for handle in self.camera_handles_a.values():
+                handle.visible = True
+            for handle in self.camera_handles_b.values():
+                handle.visible = False
         else:
             self.compare_status.content = f"**Active Model:** {self.experiment_name_b}"
+            # Show model B cameras, hide model A cameras
+            for handle in self.camera_handles_a.values():
+                handle.visible = False
+            for handle in self.camera_handles_b.values():
+                handle.visible = True
 
         # Trigger rerender for all clients
         self._trigger_rerender()
@@ -601,33 +611,43 @@ class Viewer:
                 self.render_statemachines[client.client_id].action(RenderAction("move", camera_state))
 
     def set_camera_visibility(self, visible: bool) -> None:
-        """Toggle the visibility of the training cameras."""
+        """Toggle the visibility of the training cameras for the active model."""
         with self.viser_server.atomic():
-            for idx in self.camera_handles:
-                self.camera_handles[idx].visible = visible
+            # Only toggle cameras for the active model
+            camera_handles = self.camera_handles_a if self.active_pipeline_idx == 0 else self.camera_handles_b
+            for idx in camera_handles:
+                camera_handles[idx].visible = visible
 
     def update_camera_poses(self):
         # TODO this fn accounts for like ~5% of total train time
         # Update the train camera locations based on optimization
-        assert self.camera_handles is not None
         active_model = self.get_model()
         if hasattr(active_model, "camera_optimizer"):
             camera_optimizer = active_model.camera_optimizer
         else:
             return
-        idxs = list(self.camera_handles.keys())
+
+        # Get active camera handles and original c2w based on which model is active
+        if self.active_pipeline_idx == 0:
+            camera_handles = self.camera_handles_a
+            original_c2w = self.original_c2w_a
+        else:
+            camera_handles = self.camera_handles_b
+            original_c2w = self.original_c2w_b
+
+        idxs = list(camera_handles.keys())
         with torch.no_grad():
             assert isinstance(camera_optimizer, CameraOptimizer)
             c2ws_delta = camera_optimizer(torch.tensor(idxs, device=camera_optimizer.device)).cpu().numpy()
         for i, key in enumerate(idxs):
             # both are numpy arrays
-            c2w_orig = self.original_c2w[key]
+            c2w_orig = original_c2w[key]
             c2w_delta = c2ws_delta[i, ...]
             c2w = c2w_orig @ np.concatenate((c2w_delta, np.array([[0, 0, 0, 1]])), axis=0)
             R = vtf.SO3.from_matrix(c2w[:3, :3])  # type: ignore
             R = R @ vtf.SO3.from_x_radians(np.pi)
-            self.camera_handles[key].position = c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO
-            self.camera_handles[key].wxyz = R.wxyz
+            camera_handles[key].position = c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO
+            camera_handles[key].wxyz = R.wxyz
 
     def _trigger_rerender(self) -> None:
         """Interrupt current render."""
@@ -668,21 +688,21 @@ class Viewer:
         # draw indices, roughly evenly spaced
         return np.linspace(0, total_num - 1, num_display_images, dtype=np.int32).tolist()
 
-    def init_scene(
-        self,
-        train_dataset: InputDataset,
-        train_state: Literal["training", "paused", "completed"],
-        eval_dataset: Optional[InputDataset] = None,
-    ) -> None:
-        """Draw some images and the scene aabb in the viewer.
+    def _create_camera_frustums(
+        self, train_dataset: InputDataset, camera_prefix: str, visible: bool = True
+    ) -> tuple[Dict[int, viser.CameraFrustumHandle], Dict[int, np.ndarray]]:
+        """Create camera frustums for a dataset.
 
         Args:
-            dataset: dataset to render in the scene
-            train_state: Current status of training
+            train_dataset: dataset containing cameras to render
+            camera_prefix: prefix for camera names (e.g., "/cameras_a/" or "/cameras_b/")
+            visible: whether cameras should be visible initially
+
+        Returns:
+            Tuple of (camera_handles dict, original_c2w dict)
         """
-        # draw the training cameras and images
-        self.camera_handles: Dict[int, viser.CameraFrustumHandle] = {}
-        self.original_c2w: Dict[int, np.ndarray] = {}
+        camera_handles: Dict[int, viser.CameraFrustumHandle] = {}
+        original_c2w: Dict[int, np.ndarray] = {}
         image_indices = self._pick_drawn_image_idxs(len(train_dataset))
         for idx in image_indices:
             image = train_dataset[idx]["image"]
@@ -700,13 +720,14 @@ class Viewer:
             R = vtf.SO3.from_matrix(c2w[:3, :3])
             R = R @ vtf.SO3.from_x_radians(np.pi)
             camera_handle = self.viser_server.scene.add_camera_frustum(
-                name=f"/cameras/camera_{idx:05d}",
+                name=f"{camera_prefix}camera_{idx:05d}",
                 fov=float(2 * np.arctan((camera.cx / camera.fx[0]).cpu())),
                 scale=self.config.camera_frustum_scale,
                 aspect=float((camera.cx[0] / camera.cy[0]).cpu()),
                 image=image_uint8,
                 wxyz=R.wxyz,
                 position=c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO,
+                visible=visible,
             )
 
             def create_on_click_callback(capture_idx):
@@ -720,8 +741,36 @@ class Viewer:
 
             camera_handle.on_click(create_on_click_callback(idx))
 
-            self.camera_handles[idx] = camera_handle
-            self.original_c2w[idx] = c2w
+            camera_handles[idx] = camera_handle
+            original_c2w[idx] = c2w
+
+        return camera_handles, original_c2w
+
+    def init_scene(
+        self,
+        train_dataset: InputDataset,
+        train_state: Literal["training", "paused", "completed"],
+        eval_dataset: Optional[InputDataset] = None,
+    ) -> None:
+        """Draw some images and the scene aabb in the viewer.
+
+        Args:
+            dataset: dataset to render in the scene
+            train_state: Current status of training
+        """
+        # Create camera frustums for model A
+        self.camera_handles_a, self.original_c2w_a = self._create_camera_frustums(
+            train_dataset, "/cameras_a/", visible=True
+        )
+
+        # Create camera frustums for model B if in comparison mode
+        if self.pipeline_b is not None:
+            self.camera_handles_b, self.original_c2w_b = self._create_camera_frustums(
+                self.pipeline_b.datamanager.train_dataset, "/cameras_b/", visible=False
+            )
+        else:
+            self.camera_handles_b = {}
+            self.original_c2w_b = {}
 
         self.train_state = train_state
         self.train_util = 0.9
