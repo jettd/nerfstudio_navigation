@@ -125,9 +125,6 @@ class RenderStateMachine(threading.Thread):
         # initialize the camera ray bundle
         if self.viewer.control_panel.crop_viewport:
             obb = self.viewer.control_panel.crop_obb
-            # Transform OBB for model_b
-            if self.viewer.active_pipeline_idx == 1 and self.viewer.pipeline_b is not None:
-                obb = self.viewer.transform_obb_for_model_b(obb)
         else:
             obb = None
 

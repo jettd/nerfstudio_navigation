@@ -35,7 +35,6 @@ from nerfstudio.cameras.camera_optimizers import CameraOptimizer
 from nerfstudio.cameras.cameras import CameraType
 from nerfstudio.configs import base_config as cfg
 from nerfstudio.data.datasets.base_dataset import InputDataset
-from nerfstudio.data.scene_box import OrientedBox
 from nerfstudio.models.base_model import Model
 from nerfstudio.models.splatfacto import SplatfactoModel
 from nerfstudio.pipelines.base_pipeline import Pipeline
@@ -827,35 +826,6 @@ class Viewer:
         camera.camera_to_worlds[0] = c2w_transformed
 
         return camera
-
-    def transform_obb_for_model_b(self, obb: OrientedBox) -> OrientedBox:
-        """Transform crop box to model_b coordinate system.
-
-        Args:
-            obb: Oriented bounding box in viewer coordinate system
-
-        Returns:
-            Oriented bounding box transformed to model_b coordinate system
-        """
-        if self.compare_trans is None or self.compare_rot is None:
-            return obb
-
-        trans = self.compare_trans.value
-        rot = self.compare_rot.value
-
-        # Match OBB's dtype and device
-        R_transform = torch.from_numpy(
-            vtf.SO3.from_rpy_radians(rot[0], rot[1], rot[2]).as_matrix()
-        ).to(dtype=obb.R.dtype, device=obb.R.device)
-        T_transform = torch.tensor(trans).to(dtype=obb.T.dtype, device=obb.T.device)
-
-        # Transform OBB center
-        T_new = R_transform @ obb.T + T_transform
-
-        # Compose rotations
-        R_new = R_transform @ obb.R
-
-        return OrientedBox(R=R_new, T=T_new, S=obb.S)
 
     def training_complete(self) -> None:
         """Called when training is complete."""
