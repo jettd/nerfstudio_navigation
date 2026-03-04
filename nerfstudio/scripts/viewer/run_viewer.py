@@ -70,8 +70,9 @@ class RunViewer:
 
         # Load second pipeline for comparison mode
         pipeline_b = None
+        config_b = None
         if self.compare_config is not None:
-            _, pipeline_b, _, _ = eval_setup(
+            config_b, pipeline_b, _, _ = eval_setup(
                 self.compare_config,
                 eval_num_rays_per_chunk=None,
                 test_mode="test",
@@ -83,7 +84,7 @@ class RunViewer:
         config.viewer = self.viewer.as_viewer_config()
         config.viewer.num_rays_per_chunk = num_rays_per_chunk
 
-        _start_viewer(config, pipeline, step, pipeline_b)
+        _start_viewer(config, pipeline, step, pipeline_b, config_b)
 
     def save_checkpoint(self, *args, **kwargs):
         """
@@ -91,7 +92,13 @@ class RunViewer:
         """
 
 
-def _start_viewer(config: TrainerConfig, pipeline: Pipeline, step: int, pipeline_b: Optional[Pipeline] = None):
+def _start_viewer(
+    config: TrainerConfig,
+    pipeline: Pipeline,
+    step: int,
+    pipeline_b: Optional[Pipeline] = None,
+    config_b: Optional[TrainerConfig] = None,
+):
     """Starts the viewer
 
     Args:
@@ -99,6 +106,7 @@ def _start_viewer(config: TrainerConfig, pipeline: Pipeline, step: int, pipeline
         pipeline: Pipeline instance of which to load weights
         step: Step at which the pipeline was saved
         pipeline_b: Optional second pipeline for comparison mode
+        config_b: Optional second config for comparison mode
     """
     base_dir = config.get_base_dir()
     viewer_log_path = base_dir / config.viewer.relative_log_filename
@@ -121,6 +129,8 @@ def _start_viewer(config: TrainerConfig, pipeline: Pipeline, step: int, pipeline
             datapath=pipeline.datamanager.get_datapath(),
             pipeline=pipeline,
             pipeline_b=pipeline_b,
+            experiment_name_a=config.experiment_name,
+            experiment_name_b=config_b.experiment_name if config_b is not None else None,
             share=config.viewer.make_share_url,
             train_lock=viewer_callback_lock,
         )

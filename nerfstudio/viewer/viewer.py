@@ -82,6 +82,8 @@ class Viewer:
         datapath: Path,
         pipeline: Pipeline,
         pipeline_b: Optional[Pipeline] = None,
+        experiment_name_a: Optional[str] = None,
+        experiment_name_b: Optional[str] = None,
         trainer: Optional[Trainer] = None,
         train_lock: Optional[threading.Lock] = None,
         share: bool = False,
@@ -94,6 +96,8 @@ class Viewer:
         self.pipeline = pipeline
         self.pipeline_b = pipeline_b
         self.active_pipeline_idx = 0  # 0 = pipeline, 1 = pipeline_b
+        self.experiment_name_a = experiment_name_a if experiment_name_a else "Model A"
+        self.experiment_name_b = experiment_name_b if experiment_name_b else "Model B"
         self.compare_trans = None
         self.compare_rot = None
         self.compare_reset = None
@@ -446,7 +450,7 @@ class Viewer:
             # Add comparison mode toggle button
             if self.pipeline_b is not None:
                 self.compare_toggle = self.viser_server.gui.add_button(
-                    label="Switch to Model B",
+                    label=f"Viewing: {self.experiment_name_a}",
                     disabled=False,
                     icon=viser.Icon.ARROWS_LEFT_RIGHT,
                 )
@@ -512,11 +516,11 @@ class Viewer:
         # Swap active index
         self.active_pipeline_idx = 1 - self.active_pipeline_idx
 
-        # Update button label
+        # Update button label to show current active model
         if self.active_pipeline_idx == 0:
-            self.compare_toggle.label = "Switch to Model B"
+            self.compare_toggle.label = f"Viewing: {self.experiment_name_a}"
         else:
-            self.compare_toggle.label = "Switch to Model A"
+            self.compare_toggle.label = f"Viewing: {self.experiment_name_b}"
 
         # Trigger rerender for all clients
         self._trigger_rerender()
