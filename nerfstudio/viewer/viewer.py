@@ -844,12 +844,10 @@ class Viewer:
         rot = self.compare_rot.value
 
         # Match OBB's dtype and device
-        R_transform = torch.tensor(
-            vtf.SO3.from_rpy_radians(rot[0], rot[1], rot[2]).as_matrix(),
-            dtype=obb.R.dtype,
-            device=obb.R.device,
-        )
-        T_transform = torch.tensor(trans, dtype=obb.T.dtype, device=obb.T.device)
+        R_transform = torch.from_numpy(
+            vtf.SO3.from_rpy_radians(rot[0], rot[1], rot[2]).as_matrix()
+        ).to(dtype=obb.R.dtype, device=obb.R.device)
+        T_transform = torch.tensor(trans).to(dtype=obb.T.dtype, device=obb.T.device)
 
         # Transform OBB center
         T_new = R_transform @ obb.T + T_transform
