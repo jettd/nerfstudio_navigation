@@ -214,71 +214,77 @@ class Viewer:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
-        #@self.telemetry_app.route("/nearest_view", methods=["GET"])
-        #def get_nearest_view():
-            #from flask import request
-            #import json
+        @self.telemetry_app.route("/nearest_view", methods=["GET"])
+        def get_nearest_view():
+            from flask import request
+            import json
 
-            #try:
+            try:
                 # Parse query params
-                #position = request.args.get("position")
-                #wxyz = request.args.get("wxyz")
+                position = request.args.get("position")
+                wxyz = request.args.get("wxyz")
 
-                #if not position or not wxyz:
-                    #return jsonify({"error": "Missing position or wxyz"}), 400
+                if not position or not wxyz:
+                    return jsonify({"error": "Missing position or wxyz"}), 400
 
                 # Parse JSON arrays
-                #pos = json.loads(position)
-                #wxyz_val = json.loads(wxyz)
+                pos = json.loads(position)
+                wxyz_val = json.loads(wxyz)
 
-                #if len(pos) != 3 or len(wxyz_val) != 4:
-                    #return jsonify({"error": "Invalid dimensions"}), 400
+                if len(pos) != 3 or len(wxyz_val) != 4:
+                    return jsonify({"error": "Invalid dimensions"}), 400
 
                 # Convert viewer coords → nerfstudio
-                #viewer_pos_ns = np.array(pos) / VISER_NERFSTUDIO_SCALE_RATIO
+                viewer_pos_ns = np.array(pos) / VISER_NERFSTUDIO_SCALE_RATIO
 
                 # Extract viewer direction (with π x-flip like line 408)
-                #R = vtf.SO3(wxyz=np.array(wxyz_val))
-                #R = R @ vtf.SO3.from_x_radians(np.pi)
-                #viewer_dir = -R.as_matrix()[:, 2]  # Negative z-axis
+                R = vtf.SO3(wxyz=np.array(wxyz_val))
+                R = R @ vtf.SO3.from_x_radians(np.pi)
+                viewer_dir = -R.as_matrix()[:, 2]  # Negative z-axis
 
                 # Access training cameras
-                #cameras = self.pipeline.datamanager.train_dataset.cameras
-                #candidates = []
+                cameras = self.pipeline.datamanager.train_dataset.cameras
+                candidates = []
 
-                #for idx in range(len(cameras)):
-                    #c2w = cameras.camera_to_worlds[idx]  # 3x4 tensor
+                for idx in range(len(cameras)):
+                    c2w = cameras.camera_to_worlds[idx]  # 3x4 tensor
 
                     # Extract camera position & direction
-                    #cam_pos = c2w[:3, 3].cpu().numpy()
-                    #cam_dir = -c2w[:3, 2].cpu().numpy()  # Negative z-axis
+                    cam_pos = c2w[:3, 3].cpu().numpy()
+                    cam_dir = -c2w[:3, 2].cpu().numpy()  # Negative z-axis
 
                     # Compute distance & dot product
-                    #dist = np.linalg.norm(viewer_pos_ns - cam_pos)
-                    #dot = np.dot(viewer_dir, cam_dir)
+                    dist = np.linalg.norm(viewer_pos_ns - cam_pos)
+                    dot = np.dot(viewer_dir, cam_dir)
 
                     # Filter: dot > 0 (same hemisphere)
-                    #if dot > 0:
-                        #candidates.append((idx, dist))
+                    if dot > 0:
+                        candidates.append((idx, dist))
 
                 # Fallback if empty: use all cameras
-                #if not candidates:
-                    #candidates = [(i, np.linalg.norm(viewer_pos_ns - cameras.camera_to_worlds[i][:3, 3].cpu().numpy()))
-                                  #for i in range(len(cameras))]
+                if not candidates:
+                    candidates = [(i, np.linalg.norm(viewer_pos_ns - cameras.camera_to_worlds[i][:3, 3].cpu().numpy()))
+                                  for i in range(len(cameras))]
 
-                #if not candidates:
-                    #return jsonify({"error": "No cameras available"}), 404
+                if not candidates:
+                    return jsonify({"error": "No cameras available"}), 404
 
                 # Select nearest
-                #nearest_idx, nearest_dist = min(candidates, key=lambda x: x[1])
+                nearest_idx, nearest_dist = min(candidates, key=lambda x: x[1])
 
-                #return jsonify({
-                    #"index": int(nearest_idx),
-                    #"distance": float(nearest_dist)
-                #})
+                  # Get the actual image filename
+                from pathlib import Path
+                image_filename = self.pipeline.datamanager.train_dataset._dataparser_outputs.image_filenames[nearest_idx]
+                filename_only = Path(image_filename).name  # e.g., "frame_00041.JPG"
 
-            ##except Exception as e:
-                ##return jsonify({"error": str(e)}), 500
+                return jsonify({
+                    "index": int(nearest_idx),
+                    "distance": float(nearest_dist),
+                    "filename": filename_only 
+                })
+
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
 
         # Start telemetry server in background thread
         def run_telemetry_server():
