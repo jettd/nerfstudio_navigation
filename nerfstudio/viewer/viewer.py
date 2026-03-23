@@ -286,6 +286,80 @@ class Viewer:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
+        @self.telemetry_app.route("/nearest_views", methods=["GET"])
+        def get_nearest_views():
+            from flask import request
+            import json
+
+            try:
+                position = request.args.get("position")
+                wxyz = request.args.get("wxyz")
+                n_param = request.args.get("n")
+                max_distance_param = request.args.get("max_distance")
+
+                if not position or not wxyz:
+                    return jsonify({"error": "Missing position or wxyz"}), 400
+
+                if not n_param and not max_distance_param:
+                    return jsonify({"error": "Provide n or max_distance"}), 400
+
+                pos = json.loads(position)
+                wxyz_val = json.loads(wxyz)
+
+                if len(pos) != 3 or len(wxyz_val) != 4:
+                    return jsonify({"error": "Invalid dimensions"}), 400
+
+                viewer_pos_ns = np.array(pos) / VISER_NERFSTUDIO_SCALE_RATIO
+
+                R = vtf.SO3(wxyz=np.array(wxyz_val))
+                R = R @ vtf.SO3.from_x_radians(np.pi)
+                viewer_dir = -R.as_matrix()[:, 2]
+
+                cameras = self.pipeline.datamanager.train_dataset.cameras
+                candidates = []
+
+                for idx in range(len(cameras)):
+                    c2w = cameras.camera_to_worlds[idx]
+                    cam_pos = c2w[:3, 3].cpu().numpy()
+                    cam_dir = -c2w[:3, 2].cpu().numpy()
+                    dist = float(np.linalg.norm(viewer_pos_ns - cam_pos))
+                    dot = np.dot(viewer_dir, cam_dir)
+                    if dot > 0:
+                        candidates.append((idx, dist))
+
+                if not candidates:
+                    candidates = [
+                        (i, float(np.linalg.norm(viewer_pos_ns - cameras.camera_to_worlds[i][:3, 3].cpu().numpy())))
+                        for i in range(len(cameras))
+                    ]
+
+                if not candidates:
+                    return jsonify({"error": "No cameras available"}), 404
+
+                candidates.sort(key=lambda x: x[1])
+
+                if max_distance_param:
+                    max_dist = float(max_distance_param)
+                    candidates = [(idx, dist) for idx, dist in candidates if dist <= max_dist]
+                elif n_param:
+                    candidates = candidates[:int(n_param)]
+
+                from pathlib import Path
+                image_filenames = self.pipeline.datamanager.train_dataset._dataparser_outputs.image_filenames
+                results = [
+                    {
+                        "index": int(idx),
+                        "filename": Path(image_filenames[idx]).name,
+                        "distance": dist
+                    }
+                    for idx, dist in candidates
+                ]
+
+                return jsonify(results)
+
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
         # Start telemetry server in background thread
         def run_telemetry_server():
             self.telemetry_app.run(
