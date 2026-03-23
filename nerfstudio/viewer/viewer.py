@@ -272,15 +272,18 @@ class Viewer:
                 # Select nearest
                 nearest_idx, nearest_dist = min(candidates, key=lambda x: x[1])
 
-                  # Get the actual image filename
                 from pathlib import Path
-                image_filename = self.pipeline.datamanager.train_dataset._dataparser_outputs.image_filenames[nearest_idx]
+                dataparser_outputs = self.pipeline.datamanager.train_dataset._dataparser_outputs
+                image_filename = dataparser_outputs.image_filenames[nearest_idx]
                 filename_only = Path(image_filename).name  # e.g., "frame_00041.JPG"
+                dataparser_scale = dataparser_outputs.dataparser_scale
+                distance_meters = float(nearest_dist) / dataparser_scale if dataparser_scale else None
 
                 return jsonify({
                     "index": int(nearest_idx),
                     "distance": float(nearest_dist),
-                    "filename": filename_only 
+                    "distance_meters": distance_meters,
+                    "filename": filename_only
                 })
 
             except Exception as e:
@@ -338,19 +341,24 @@ class Viewer:
 
                 candidates.sort(key=lambda x: x[1])
 
+                from pathlib import Path
+                dataparser_outputs = self.pipeline.datamanager.train_dataset._dataparser_outputs
+                dataparser_scale = dataparser_outputs.dataparser_scale
+
                 if max_distance_param:
-                    max_dist = float(max_distance_param)
-                    candidates = [(idx, dist) for idx, dist in candidates if dist <= max_dist]
+                    # max_distance_param is in meters — convert to scene units for filtering
+                    max_dist_scene = float(max_distance_param) * dataparser_scale if dataparser_scale else float(max_distance_param)
+                    candidates = [(idx, dist) for idx, dist in candidates if dist <= max_dist_scene]
                 elif n_param:
                     candidates = candidates[:int(n_param)]
 
-                from pathlib import Path
-                image_filenames = self.pipeline.datamanager.train_dataset._dataparser_outputs.image_filenames
+                image_filenames = dataparser_outputs.image_filenames
                 results = [
                     {
                         "index": int(idx),
                         "filename": Path(image_filenames[idx]).name,
-                        "distance": dist
+                        "distance": dist,
+                        "distance_meters": dist / dataparser_scale if dataparser_scale else None
                     }
                     for idx, dist in candidates
                 ]
