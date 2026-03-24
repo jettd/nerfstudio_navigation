@@ -524,6 +524,7 @@ def populate_render_tab(
     config_path: Path,
     datapath: Path,
     control_panel: Optional[ControlPanel] = None,
+    harvest_telem_port: Optional[int] = None,
 ) -> RenderTabState:
     from nerfstudio.viewer.viewer import VISER_NERFSTUDIO_SCALE_RATIO
 
@@ -1144,33 +1145,55 @@ def populate_render_tab(
             json_outfile.parent.mkdir(parents=True, exist_ok=True)
         with open(json_outfile.absolute(), "w") as outfile:
             json.dump(json_data, outfile)
-        # now show the command
-        with event.client.gui.add_modal("Render Command") as modal:
-            dataname = datapath.name
-            command = " ".join(
-                [
-                    "ns-render camera-path",
-                    f"--load-config {config_path}",
-                    f"--camera-path-filename {json_outfile.absolute()}",
-                    f"--output-path renders/{dataname}/{render_name_text.value}.mp4",
-                ]
-            )
-            event.client.gui.add_markdown(
-                "\n".join(
+        # If running under Harvest, submit job via telemetry Flask server
+        if harvest_telem_port is not None:
+            import requests as _requests
+            try:
+                resp = _requests.post(
+                    f"http://localhost:{harvest_telem_port}/submit_render_job",
+                    json={
+                        "render_name": render_name_text.value,
+                        "camera_path_json_path": str(json_outfile.absolute()),
+                        "fps": framerate_number.value,
+                        "width": resolution.value[0],
+                        "height": resolution.value[1],
+                    },
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    CONSOLE.print(f"[bold green]Render job submitted (id={resp.json().get('id')})")
+                else:
+                    CONSOLE.print(f"[bold red]Failed to submit render job: {resp.text}")
+            except Exception as e:
+                CONSOLE.print(f"[bold red]Error submitting render job: {e}")
+        else:
+            # Fallback: show original command modal
+            with event.client.gui.add_modal("Render Command") as modal:
+                dataname = datapath.name
+                command = " ".join(
                     [
-                        "To render the trajectory, run the following from the command line:",
-                        "",
-                        "```",
-                        command,
-                        "```",
+                        "ns-render camera-path",
+                        f"--load-config {config_path}",
+                        f"--camera-path-filename {json_outfile.absolute()}",
+                        f"--output-path renders/{dataname}/{render_name_text.value}.mp4",
                     ]
                 )
-            )
-            close_button = event.client.gui.add_button("Close")
+                event.client.gui.add_markdown(
+                    "\n".join(
+                        [
+                            "To render the trajectory, run the following from the command line:",
+                            "",
+                            "```",
+                            command,
+                            "```",
+                        ]
+                    )
+                )
+                close_button = event.client.gui.add_button("Close")
 
-            @close_button.on_click
-            def _(_) -> None:
-                modal.close()
+                @close_button.on_click
+                def _(_) -> None:
+                    modal.close()
 
     if control_panel is not None:
         camera_path = CameraPath(server, duration_number, control_panel._time_enabled)
