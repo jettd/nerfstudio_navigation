@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Literal, Optional
 
+import requests
 import numpy as np
 import torch
 import viser
@@ -144,6 +146,11 @@ class Viewer:
 
         # Initialize telemetry HTTP server
         self.telemetry_port = websocket_port + 1000
+        # Harvest integration env vars (set by SLURM viewer script)
+        self.harvest_api_url = os.environ.get("HARVEST_API_URL", "")
+        self.harvest_api_token = os.environ.get("HARVEST_API_TOKEN", "")
+        self.harvest_region_model_id = os.environ.get("HARVEST_REGION_MODEL_ID", "")
+        self.harvest_config_path = os.environ.get("HARVEST_CONFIG_PATH", "")
         self.telemetry_app = Flask("nerfstudio_telemetry")
         CORS(self.telemetry_app)  # Allow cross-origin requests from Harvest
 
@@ -368,6 +375,63 @@ class Viewer:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
+        @self.telemetry_app.route("/submit_render_job", methods=["POST"])
+        def submit_render_job():
+            from flask import request as flask_request
+            if not self.harvest_api_url or not self.harvest_region_model_id:
+                return jsonify({"error": "Viewer not launched via Harvest (HARVEST_API_URL not set)"}), 503
+
+            data = flask_request.get_json()
+            if not data:
+                return jsonify({"error": "No JSON body"}), 400
+
+            payload = {
+                "region_model_id": self.harvest_region_model_id,
+                "render_name": data.get("render_name"),
+                "camera_path_json_path": data.get("camera_path_json_path"),
+                "fps": data.get("fps", 30),
+                "width": data.get("width", 1920),
+                "height": data.get("height", 1080),
+            }
+
+            try:
+                resp = requests.post(
+                    f"{self.harvest_api_url.rstrip('/')}/api/render_jobs",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self.harvest_api_token}"},
+                    timeout=15,
+                )
+                return jsonify(resp.json()), resp.status_code
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @self.telemetry_app.route("/submit_export_job", methods=["POST"])
+        def submit_export_job():
+            from flask import request as flask_request
+            if not self.harvest_api_url or not self.harvest_region_model_id:
+                return jsonify({"error": "Viewer not launched via Harvest (HARVEST_API_URL not set)"}), 503
+
+            data = flask_request.get_json()
+            if not data:
+                return jsonify({"error": "No JSON body"}), 400
+
+            payload = {
+                "region_model_id": self.harvest_region_model_id,
+                "export_type": data.get("export_type"),
+                "export_params": data.get("export_params", {}),
+            }
+
+            try:
+                resp = requests.post(
+                    f"{self.harvest_api_url.rstrip('/')}/api/export_jobs",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self.harvest_api_token}"},
+                    timeout=15,
+                )
+                return jsonify(resp.json()), resp.status_code
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
         # Start telemetry server in background thread
         def run_telemetry_server():
             self.telemetry_app.run(
@@ -463,9 +527,9 @@ class Viewer:
         # Render and Export tabs disabled - only show Control tab
         config_path = self.log_filename.parents[0] / "config.yml"
         with tabs.add_tab("Render", viser.Icon.CAMERA):
-            self.render_tab_state=populate_render_tab(self.viser_server, config_path, self.datapath, self.control_panel)
+            self.render_tab_state=populate_render_tab(self.viser_server, config_path, self.datapath, self.control_panel, harvest_telem_port=self.telemetry_port)
         with tabs.add_tab("Export", viser.Icon.PACKAGE_EXPORT):
-            populate_export_tab(self.viser_server, self.control_panel, config_path, self.pipeline.model)
+            populate_export_tab(self.viser_server, self.control_panel, config_path, self.pipeline.model, harvest_telem_port=self.telemetry_port)
 
         #from nerfstudio.viewer.render_panel import RenderTabState
         #self.render_tab_state = RenderTabState(
