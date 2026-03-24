@@ -153,17 +153,6 @@ def _render_trajectory_video(
 
                     for i in range(len(train_cameras)):
                         train_cam_pos = train_cameras[i].camera_to_worlds[:, 3].cpu()
-                        # Make sure the line of sight from rendered cam to training cam is not blocked by any object
-                        bundle = RayBundle(
-                            origins=cam_pos.view(1, 3),
-                            directions=((cam_pos - train_cam_pos) / (cam_pos - train_cam_pos).norm()).view(1, 3),
-                            pixel_area=torch.tensor(1).view(1, 1),
-                            nears=torch.tensor(0.05).view(1, 1),
-                            fars=torch.tensor(100).view(1, 1),
-                            camera_indices=torch.tensor(0).view(1, 1),
-                            metadata={},
-                        ).to(pipeline.device)
-                        outputs = pipeline.model.get_outputs(bundle)
 
                         q = tf.SO3.from_matrix(train_cameras[i].camera_to_worlds[:3, :3].numpy(force=True)).wxyz
                         # calculate distance between two quaternions
@@ -175,12 +164,23 @@ def _render_trajectory_video(
                             true_max_dist = dist
                             true_max_idx = i
 
-                        if outputs["depth"][0] < torch.norm(cam_pos - train_cam_pos).item():
-                            continue
-
-                        if check_occlusions and (max_dist == -1 or dist < max_dist):
-                            max_dist = dist
-                            max_idx = i
+                        if check_occlusions:
+                            # Make sure the line of sight from rendered cam to training cam is not blocked by any object
+                            bundle = RayBundle(
+                                origins=cam_pos.view(1, 3),
+                                directions=((cam_pos - train_cam_pos) / (cam_pos - train_cam_pos).norm()).view(1, 3),
+                                pixel_area=torch.tensor(1).view(1, 1),
+                                nears=torch.tensor(0.05).view(1, 1),
+                                fars=torch.tensor(100).view(1, 1),
+                                camera_indices=torch.tensor(0).view(1, 1),
+                                metadata={},
+                            ).to(pipeline.device)
+                            outputs = pipeline.model.get_outputs(bundle)
+                            if outputs["depth"][0] < torch.norm(cam_pos - train_cam_pos).item():
+                                continue
+                            if max_dist == -1 or dist < max_dist:
+                                max_dist = dist
+                                max_idx = i
 
                     if max_idx == -1:
                         max_idx = true_max_idx
