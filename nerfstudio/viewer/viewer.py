@@ -392,6 +392,7 @@ class Viewer:
                 "fps": data.get("fps", 30),
                 "width": data.get("width", 1920),
                 "height": data.get("height", 1080),
+                "render_nearest_camera": data.get("render_nearest_camera", False),
             }
 
             try:

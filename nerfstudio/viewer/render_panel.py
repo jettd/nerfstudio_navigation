@@ -945,77 +945,6 @@ def populate_render_tab(
         play_button.visible = True
         pause_button.visible = False
 
-    # add button for loading existing path
-    load_camera_path_button = server.gui.add_button(
-        "Load Path", icon=viser.Icon.FOLDER_OPEN, hint="Load an existing camera path."
-    )
-
-    @load_camera_path_button.on_click
-    def _(event: viser.GuiEvent) -> None:
-        assert event.client is not None
-        camera_path_dir = datapath / "camera_paths"
-        camera_path_dir.mkdir(parents=True, exist_ok=True)
-        preexisting_camera_paths = list(camera_path_dir.glob("*.json"))
-        preexisting_camera_filenames = [p.name for p in preexisting_camera_paths]
-
-        with event.client.gui.add_modal("Load Path") as modal:
-            if len(preexisting_camera_filenames) == 0:
-                event.client.gui.add_markdown("No existing paths found")
-            else:
-                event.client.gui.add_markdown("Select existing camera path:")
-                camera_path_dropdown = event.client.gui.add_dropdown(
-                    label="Camera Path",
-                    options=[str(p) for p in preexisting_camera_filenames],
-                    initial_value=str(preexisting_camera_filenames[0]),
-                )
-                load_button = event.client.gui.add_button("Load")
-
-                @load_button.on_click
-                def _(_) -> None:
-                    # load the json file
-                    json_path = datapath / "camera_paths" / camera_path_dropdown.value
-                    with open(json_path, "r") as f:
-                        json_data = json.load(f)
-
-                    keyframes = json_data["keyframes"]
-                    camera_path.reset()
-                    for i in range(len(keyframes)):
-                        frame = keyframes[i]
-                        pose = tf.SE3.from_matrix(np.array(frame["matrix"]).reshape(4, 4))
-                        # apply the x rotation by 180 deg
-                        pose = tf.SE3.from_rotation_and_translation(
-                            pose.rotation() @ tf.SO3.from_x_radians(np.pi),
-                            pose.translation(),
-                        )
-                        camera_path.add_camera(
-                            Keyframe(
-                                position=pose.translation() * VISER_NERFSTUDIO_SCALE_RATIO,
-                                wxyz=pose.rotation().wxyz,
-                                # There are some floating point conversions between degrees and radians, so the fov and
-                                # default_Fov values will not be exactly matched.
-                                override_fov_enabled=abs(frame["fov"] - json_data.get("default_fov", 0.0)) > 1e-3,
-                                override_fov_rad=frame["fov"] / 180.0 * np.pi,
-                                override_time_enabled=frame.get("override_time_enabled", False),
-                                override_time_val=frame.get("render_time", None),
-                                aspect=frame["aspect"],
-                                override_transition_enabled=frame.get("override_transition_enabled", None),
-                                override_transition_sec=frame.get("override_transition_sec", None),
-                            ),
-                        )
-
-                    transition_sec_number.value = json_data.get("default_transition_sec", 0.5)
-
-                    # update the render name
-                    render_name_text.value = json_path.stem
-                    camera_path.update_spline()
-                    modal.close()
-
-            cancel_button = event.client.gui.add_button("Cancel")
-
-            @cancel_button.on_click
-            def _(_) -> None:
-                modal.close()
-
     # set the initial value to the current date-time string
     now = datetime.datetime.now()
     render_name_text = server.gui.add_text(
@@ -1023,11 +952,16 @@ def populate_render_tab(
         initial_value=now.strftime("%Y-%m-%d-%H-%M-%S"),
         hint="Name of the render",
     )
+    render_nearest_camera_checkbox = server.gui.add_checkbox(
+        "Render Nearest Camera",
+        initial_value=False,
+        hint="For each rendered frame, show the nearest training image side-by-side.",
+    )
     render_button = server.gui.add_button(
-        "Generate Command",
+        "Generate Render Job",
         color="green",
         icon=viser.Icon.FILE_EXPORT,
-        hint="Generate the ns-render command for rendering the camera path.",
+        hint="Submit a render job for this camera path.",
     )
 
     reset_up_button = server.gui.add_button(
@@ -1157,6 +1091,7 @@ def populate_render_tab(
                         "fps": framerate_number.value,
                         "width": resolution.value[0],
                         "height": resolution.value[1],
+                        "render_nearest_camera": render_nearest_camera_checkbox.value,
                     },
                     timeout=15,
                 )
