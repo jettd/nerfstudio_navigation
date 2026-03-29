@@ -434,6 +434,7 @@ class Viewer:
             payload = {
                 "region_model_id": active_region_model_id,
                 "export_type": data.get("export_type"),
+                "export_name": data.get("export_name"),
                 "export_params": data.get("export_params", {}),
             }
 
