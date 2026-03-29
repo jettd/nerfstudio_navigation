@@ -150,6 +150,7 @@ class Viewer:
         self.harvest_api_url = os.environ.get("HARVEST_API_URL", "")
         self.harvest_api_token = os.environ.get("HARVEST_API_TOKEN", "")
         self.harvest_region_model_id = os.environ.get("HARVEST_REGION_MODEL_ID", "")
+        self.harvest_region_model_id_b = os.environ.get("HARVEST_REGION_MODEL_ID_B", "")
         self.harvest_config_path = os.environ.get("HARVEST_CONFIG_PATH", "")
         self.telemetry_app = Flask("nerfstudio_telemetry")
         CORS(self.telemetry_app)  # Allow cross-origin requests from Harvest
@@ -385,8 +386,14 @@ class Viewer:
             if not data:
                 return jsonify({"error": "No JSON body"}), 400
 
+            active_region_model_id = (
+                self.harvest_region_model_id_b
+                if self.active_pipeline_idx == 1 and self.harvest_region_model_id_b
+                else self.harvest_region_model_id
+            )
+
             payload = {
-                "region_model_id": self.harvest_region_model_id,
+                "region_model_id": active_region_model_id,
                 "render_name": data.get("render_name"),
                 "camera_path_json_path": data.get("camera_path_json_path"),
                 "fps": data.get("fps", 30),
@@ -416,8 +423,14 @@ class Viewer:
             if not data:
                 return jsonify({"error": "No JSON body"}), 400
 
+            active_region_model_id = (
+                self.harvest_region_model_id_b
+                if self.active_pipeline_idx == 1 and self.harvest_region_model_id_b
+                else self.harvest_region_model_id
+            )
+
             payload = {
-                "region_model_id": self.harvest_region_model_id,
+                "region_model_id": active_region_model_id,
                 "export_type": data.get("export_type"),
                 "export_params": data.get("export_params", {}),
             }
