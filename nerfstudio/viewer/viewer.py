@@ -250,8 +250,9 @@ class Viewer:
                 R = R @ vtf.SO3.from_x_radians(np.pi)
                 viewer_dir = -R.as_matrix()[:, 2]  # Negative z-axis
 
-                # Access training cameras
-                cameras = self.pipeline.datamanager.train_dataset.cameras
+                # Access training cameras from the active pipeline
+                active_pipeline = self.pipeline_b if self.active_pipeline_idx == 1 and self.pipeline_b else self.pipeline
+                cameras = active_pipeline.datamanager.train_dataset.cameras
                 candidates = []
 
                 for idx in range(len(cameras)):
@@ -281,7 +282,7 @@ class Viewer:
                 nearest_idx, nearest_dist = min(candidates, key=lambda x: x[1])
 
                 from pathlib import Path
-                dataparser_outputs = self.pipeline.datamanager.train_dataset._dataparser_outputs
+                dataparser_outputs = active_pipeline.datamanager.train_dataset._dataparser_outputs
                 image_filename = dataparser_outputs.image_filenames[nearest_idx]
                 filename_only = Path(image_filename).name  # e.g., "frame_00041.JPG"
                 dataparser_scale = dataparser_outputs.dataparser_scale
@@ -326,7 +327,8 @@ class Viewer:
                 R = R @ vtf.SO3.from_x_radians(np.pi)
                 viewer_dir = -R.as_matrix()[:, 2]
 
-                cameras = self.pipeline.datamanager.train_dataset.cameras
+                active_pipeline = self.pipeline_b if self.active_pipeline_idx == 1 and self.pipeline_b else self.pipeline
+                cameras = active_pipeline.datamanager.train_dataset.cameras
                 candidates = []
 
                 for idx in range(len(cameras)):
@@ -350,7 +352,7 @@ class Viewer:
                 candidates.sort(key=lambda x: x[1])
 
                 from pathlib import Path
-                dataparser_outputs = self.pipeline.datamanager.train_dataset._dataparser_outputs
+                dataparser_outputs = active_pipeline.datamanager.train_dataset._dataparser_outputs
                 dataparser_scale = dataparser_outputs.dataparser_scale
 
                 if max_distance_param:
