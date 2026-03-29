@@ -259,12 +259,27 @@ def populate_splat_tab(
     if viewing_gsplat:
         server.gui.add_markdown("<small>Generate ply export of Gaussian Splat</small>")
 
-        output_directory = server.gui.add_text("Output Directory", initial_value="exports/splat/")
+        import datetime as _dt
+        export_name = server.gui.add_text(
+            "Export name",
+            initial_value=_dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"),
+            hint="Name for this export (letters, numbers, underscores, hyphens only)",
+        )
+        ply_color_mode = server.gui.add_dropdown(
+            "Color Mode",
+            ("sh_coeffs", "rgb"),
+            initial_value="sh_coeffs",
+            hint="How colors are stored in the PLY file. sh_coeffs preserves full appearance; rgb is compatible with most viewers.",
+        )
         generate_command = server.gui.add_button("Generate Command", icon=viser.Icon.TERMINAL_2)
 
         @generate_command.on_click
         def _(event: viser.GuiEvent) -> None:
             assert event.client is not None
+            import re as _re
+            if not _re.match(r'^[a-zA-Z0-9_-]+$', export_name.value):
+                CONSOLE.print("[bold red]Export name may only contain letters, numbers, underscores, and hyphens")
+                return
             crop_args = get_crop_string(control_panel.crop_obb, control_panel.crop_viewport)
             if harvest_telem_port is not None:
                 import requests as _requests
@@ -273,7 +288,11 @@ def populate_splat_tab(
                         f"http://localhost:{harvest_telem_port}/submit_export_job",
                         json={
                             "export_type": "splat",
-                            "export_params": {"crop_args": crop_args},
+                            "export_name": export_name.value,
+                            "export_params": {
+                                "ply_color_mode": ply_color_mode.value,
+                                "crop_args": crop_args,
+                            },
                         },
                         timeout=15,
                     )
@@ -288,7 +307,7 @@ def populate_splat_tab(
                     [
                         "ns-export gaussian-splat",
                         f"--load-config {config_path}",
-                        f"--output-dir {output_directory.value}",
+                        f"--ply-color-mode {ply_color_mode.value}",
                         crop_args,
                     ]
                 )

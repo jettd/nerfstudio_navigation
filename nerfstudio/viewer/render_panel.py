@@ -1081,6 +1081,10 @@ def populate_render_tab(
             json.dump(json_data, outfile)
         # If running under Harvest, submit job via telemetry Flask server
         if harvest_telem_port is not None:
+            import re as _re
+            if not _re.match(r'^[a-zA-Z0-9_-]+$', render_name_text.value):
+                CONSOLE.print("[bold red]Render name may only contain letters, numbers, underscores, and hyphens")
+                return
             import requests as _requests
             try:
                 resp = _requests.post(
