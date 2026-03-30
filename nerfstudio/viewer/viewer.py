@@ -288,11 +288,13 @@ class Viewer:
                 dataparser_scale = dataparser_outputs.dataparser_scale
                 distance_meters = float(nearest_dist) / dataparser_scale if dataparser_scale else None
 
+                pipeline_idx = 1 if (self.active_pipeline_idx == 1 and self.pipeline_b) else 0
                 return jsonify({
                     "index": int(nearest_idx),
                     "distance": float(nearest_dist),
                     "distance_meters": distance_meters,
-                    "filename": filename_only
+                    "filename": filename_only,
+                    "pipeline_idx": pipeline_idx
                 })
 
             except Exception as e:
@@ -362,13 +364,15 @@ class Viewer:
                 elif n_param:
                     candidates = candidates[:int(n_param)]
 
+                pipeline_idx = 1 if (self.active_pipeline_idx == 1 and self.pipeline_b) else 0
                 image_filenames = dataparser_outputs.image_filenames
                 results = [
                     {
                         "index": int(idx),
                         "filename": Path(image_filenames[idx]).name,
                         "distance": dist,
-                        "distance_meters": dist / dataparser_scale if dataparser_scale else None
+                        "distance_meters": dist / dataparser_scale if dataparser_scale else None,
+                        "pipeline_idx": pipeline_idx
                     }
                     for idx, dist in candidates
                 ]
