@@ -30,7 +30,7 @@ import viser
 import viser.theme
 import viser.transforms as vtf
 from typing_extensions import assert_never
-from flask import Flask, jsonify
+from flask import Flask, Response, jsonify, stream_with_context
 from flask_cors import CORS
 
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer
@@ -222,84 +222,6 @@ class Viewer:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
-        @self.telemetry_app.route("/nearest_view", methods=["GET"])
-        def get_nearest_view():
-            from flask import request
-            import json
-
-            try:
-                # Parse query params
-                position = request.args.get("position")
-                wxyz = request.args.get("wxyz")
-
-                if not position or not wxyz:
-                    return jsonify({"error": "Missing position or wxyz"}), 400
-
-                # Parse JSON arrays
-                pos = json.loads(position)
-                wxyz_val = json.loads(wxyz)
-
-                if len(pos) != 3 or len(wxyz_val) != 4:
-                    return jsonify({"error": "Invalid dimensions"}), 400
-
-                # Convert viewer coords → nerfstudio
-                viewer_pos_ns = np.array(pos) / VISER_NERFSTUDIO_SCALE_RATIO
-
-                # Extract viewer direction (with π x-flip like line 408)
-                R = vtf.SO3(wxyz=np.array(wxyz_val))
-                R = R @ vtf.SO3.from_x_radians(np.pi)
-                viewer_dir = -R.as_matrix()[:, 2]  # Negative z-axis
-
-                # Access training cameras from the active pipeline
-                active_pipeline = self.pipeline_b if self.active_pipeline_idx == 1 and self.pipeline_b else self.pipeline
-                cameras = active_pipeline.datamanager.train_dataset.cameras
-                candidates = []
-
-                for idx in range(len(cameras)):
-                    c2w = cameras.camera_to_worlds[idx]  # 3x4 tensor
-
-                    # Extract camera position & direction
-                    cam_pos = c2w[:3, 3].cpu().numpy()
-                    cam_dir = -c2w[:3, 2].cpu().numpy()  # Negative z-axis
-
-                    # Compute distance & dot product
-                    dist = np.linalg.norm(viewer_pos_ns - cam_pos)
-                    dot = np.dot(viewer_dir, cam_dir)
-
-                    # Filter: dot > 0 (same hemisphere)
-                    if dot > 0:
-                        candidates.append((idx, dist))
-
-                # Fallback if empty: use all cameras
-                if not candidates:
-                    candidates = [(i, np.linalg.norm(viewer_pos_ns - cameras.camera_to_worlds[i][:3, 3].cpu().numpy()))
-                                  for i in range(len(cameras))]
-
-                if not candidates:
-                    return jsonify({"error": "No cameras available"}), 404
-
-                # Select nearest
-                nearest_idx, nearest_dist = min(candidates, key=lambda x: x[1])
-
-                from pathlib import Path
-                dataparser_outputs = active_pipeline.datamanager.train_dataset._dataparser_outputs
-                image_filename = dataparser_outputs.image_filenames[nearest_idx]
-                filename_only = Path(image_filename).name  # e.g., "frame_00041.JPG"
-                dataparser_scale = dataparser_outputs.dataparser_scale
-                distance_meters = float(nearest_dist) / dataparser_scale if dataparser_scale else None
-
-                pipeline_idx = 1 if (self.active_pipeline_idx == 1 and self.pipeline_b) else 0
-                return jsonify({
-                    "index": int(nearest_idx),
-                    "distance": float(nearest_dist),
-                    "distance_meters": distance_meters,
-                    "filename": filename_only,
-                    "pipeline_idx": pipeline_idx
-                })
-
-            except Exception as e:
-                return jsonify({"error": str(e)}), 500
-
         @self.telemetry_app.route("/nearest_views", methods=["GET"])
         def get_nearest_views():
             from flask import request
@@ -313,9 +235,6 @@ class Viewer:
 
                 if not position or not wxyz:
                     return jsonify({"error": "Missing position or wxyz"}), 400
-
-                if not n_param and not max_distance_param:
-                    return jsonify({"error": "Provide n or max_distance"}), 400
 
                 pos = json.loads(position)
                 wxyz_val = json.loads(wxyz)
@@ -361,8 +280,8 @@ class Viewer:
                     # max_distance_param is in meters — convert to scene units for filtering
                     max_dist_scene = float(max_distance_param) * dataparser_scale if dataparser_scale else float(max_distance_param)
                     candidates = [(idx, dist) for idx, dist in candidates if dist <= max_dist_scene]
-                elif n_param:
-                    candidates = candidates[:int(n_param)]
+                else:
+                    candidates = candidates[:int(n_param) if n_param else 1]
 
                 pipeline_idx = 1 if (self.active_pipeline_idx == 1 and self.pipeline_b) else 0
                 image_filenames = dataparser_outputs.image_filenames
@@ -381,6 +300,36 @@ class Viewer:
 
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
+
+        @self.telemetry_app.route("/telemetry_stream", methods=["GET"])
+        def get_telemetry_stream():
+            import json
+            import time
+
+            def generate():
+                while True:
+                    try:
+                        clients_data = []
+                        clients = self.viser_server.get_clients()
+                        for client_id, client in clients.items():
+                            clients_data.append({
+                                "client_id": client_id,
+                                "position": client.camera.position.tolist(),
+                                "wxyz": client.camera.wxyz.tolist(),
+                                "fov": float(client.camera.fov),
+                                "aspect": float(client.camera.aspect),
+                            })
+                        yield f"data: {json.dumps({'clients': clients_data})}\n\n"
+                    except GeneratorExit:
+                        break
+                    except Exception as e:
+                        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    time.sleep(0.5)
+
+            response = Response(stream_with_context(generate()), mimetype="text/event-stream")
+            response.headers["Cache-Control"] = "no-cache"
+            response.headers["X-Accel-Buffering"] = "no"
+            return response
 
         @self.telemetry_app.route("/submit_render_job", methods=["POST"])
         def submit_render_job():
