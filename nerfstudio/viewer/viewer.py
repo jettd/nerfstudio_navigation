@@ -152,6 +152,8 @@ class Viewer:
         self.harvest_region_model_id = os.environ.get("HARVEST_REGION_MODEL_ID", "")
         self.harvest_region_model_id_b = os.environ.get("HARVEST_REGION_MODEL_ID_B", "")
         self.harvest_config_path = os.environ.get("HARVEST_CONFIG_PATH", "")
+        self.waypoint_handles: Dict[str, list] = {}  # safe_name → [sphere_handle, label_handle]
+        self.measurement_handles: list = []
         self.telemetry_app = Flask("nerfstudio_telemetry")
         CORS(self.telemetry_app)  # Allow cross-origin requests from Harvest
 
@@ -331,35 +333,117 @@ class Viewer:
             response.headers["X-Accel-Buffering"] = "no"
             return response
 
-        @self.telemetry_app.route("/probe_scene", methods=["POST"])
-        def probe_scene():
-            results = {}
-            # Test add_icosphere (preferred waypoint marker)
-            try:
+        @self.telemetry_app.route("/sync_waypoints", methods=["POST"])
+        def sync_waypoints():
+            from flask import request as flask_request
+
+            data = flask_request.get_json()
+            if data is None:
+                return jsonify({"error": "No JSON body"}), 400
+
+            waypoints = data.get("waypoints", [])
+
+            # Remove all existing waypoint scene nodes
+            for handles in self.waypoint_handles.values():
+                for h in handles:
+                    try:
+                        h.remove()
+                    except Exception:
+                        pass
+            self.waypoint_handles = {}
+
+            for wp in waypoints:
+                name = wp.get("name", "waypoint")
+                position = wp.get("position", [0.0, 0.0, 0.0])
+                color_hex = wp.get("color", "#ffffff").lstrip("#")
+                visible = wp.get("visible", True)
+
+                r = int(color_hex[0:2], 16)
+                g = int(color_hex[2:4], 16)
+                b = int(color_hex[4:6], 16)
+
+                safe_name = name.replace(" ", "_").replace("/", "_")
+
                 sphere_handle = self.viser_server.scene.add_icosphere(
-                    name="/probe/sphere",
-                    radius=0.3,
-                    color=(255, 165, 0),
-                    position=(0.0, 0.0, 0.0),
+                    name=f"/waypoints/{safe_name}/sphere",
+                    radius=0.15,
+                    color=(r, g, b),
+                    position=tuple(float(v) for v in position),
                 )
-                results["sphere_type"] = type(sphere_handle).__name__
-            except Exception as e:
-                results["sphere_error"] = str(e)
+                sphere_handle.visible = visible
 
-            # Test add_spline_catmull_rom (candidate for measurement line)
+                label_handle = self.viser_server.scene.add_label(
+                    name=f"/waypoints/{safe_name}/label",
+                    text=name,
+                    position=tuple(float(v) for v in position),
+                )
+                label_handle.visible = visible
+
+                self.waypoint_handles[safe_name] = [sphere_handle, label_handle]
+
+            return jsonify({"success": True, "count": len(waypoints)})
+
+        @self.telemetry_app.route("/measure_distance", methods=["POST"])
+        def measure_distance():
+            from flask import request as flask_request
+
+            data = flask_request.get_json()
+            if data is None:
+                return jsonify({"error": "No JSON body"}), 400
+
+            # Clear existing measurement visualization
+            for h in self.measurement_handles:
+                try:
+                    h.remove()
+                except Exception:
+                    pass
+            self.measurement_handles = []
+
+            pos1 = data.get("pos1")
+            pos2 = data.get("pos2")
+
+            if pos1 is None or pos2 is None:
+                return jsonify({"success": True, "cleared": True})
+
+            p1 = np.array(pos1, dtype=float)
+            p2 = np.array(pos2, dtype=float)
+
+            # Draw yellow spline between the two points
+            spline_handle = self.viser_server.scene.add_spline_catmull_rom(
+                name="/measurement/line",
+                positions=np.array([p1.tolist(), p2.tolist()]),
+                color=(255, 220, 0),
+                line_width=3.0,
+            )
+            self.measurement_handles.append(spline_handle)
+
+            # Compute distance
+            dist_viser = float(np.linalg.norm(p1 - p2))
+            dist_ns = dist_viser / VISER_NERFSTUDIO_SCALE_RATIO
+
             try:
-                spline_handle = self.viser_server.scene.add_spline_catmull_rom(
-                    name="/probe/spline",
-                    positions=np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]),
-                    color=(255, 220, 0),
-                    line_width=3.0,
-                )
-                results["spline_type"] = type(spline_handle).__name__
-            except Exception as e:
-                results["spline_error"] = str(e)
+                dataparser_outputs = self.pipeline.datamanager.train_dataset._dataparser_outputs
+                dataparser_scale = float(dataparser_outputs.dataparser_scale)
+                dist_meters = dist_ns / dataparser_scale if dataparser_scale else None
+            except Exception:
+                dist_meters = None
 
-            results["success"] = "sphere_error" not in results
-            return jsonify(results)
+            label_text = f"{dist_meters:.2f} m" if dist_meters is not None else f"{dist_ns:.3f} units"
+
+            midpoint = ((p1 + p2) / 2).tolist()
+            label_handle = self.viser_server.scene.add_label(
+                name="/measurement/label",
+                text=label_text,
+                position=tuple(float(v) for v in midpoint),
+            )
+            self.measurement_handles.append(label_handle)
+
+            return jsonify({
+                "success": True,
+                "distance_meters": dist_meters,
+                "distance_ns": dist_ns,
+                "label_text": label_text,
+            })
 
         @self.telemetry_app.route("/submit_render_job", methods=["POST"])
         def submit_render_job():
