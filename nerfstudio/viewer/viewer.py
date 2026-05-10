@@ -333,32 +333,33 @@ class Viewer:
 
         @self.telemetry_app.route("/probe_scene", methods=["POST"])
         def probe_scene():
+            results = {}
+            # Test add_icosphere (preferred waypoint marker)
             try:
-                dot_handle = self.viser_server.scene.add_point_cloud(
-                    name="/probe/dot",
-                    points=np.array([[0.0, 0.0, 0.0]]),
-                    colors=np.array([[255, 165, 0]], dtype=np.uint8),
-                    point_size=1.0,
+                sphere_handle = self.viser_server.scene.add_icosphere(
+                    name="/probe/sphere",
+                    radius=0.3,
+                    color=(255, 165, 0),
+                    position=(0.0, 0.0, 0.0),
                 )
-                label_handle = self.viser_server.scene.add_label(
-                    name="/probe/label",
-                    text="PROBE OK",
-                    position=(0.0, 0.0, 1.0),
-                )
-                line_handle = self.viser_server.scene.add_line_segments(
-                    name="/probe/line",
-                    points=np.array([[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]]),
-                    colors=np.array([[255, 255, 0]], dtype=np.uint8),
+                results["sphere_type"] = type(sphere_handle).__name__
+            except Exception as e:
+                results["sphere_error"] = str(e)
+
+            # Test add_spline_catmull_rom (candidate for measurement line)
+            try:
+                spline_handle = self.viser_server.scene.add_spline_catmull_rom(
+                    name="/probe/spline",
+                    positions=np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]),
+                    color=(255, 220, 0),
                     line_width=3.0,
                 )
-                return jsonify({
-                    "success": True,
-                    "dot_type": type(dot_handle).__name__,
-                    "label_type": type(label_handle).__name__,
-                    "line_type": type(line_handle).__name__,
-                })
+                results["spline_type"] = type(spline_handle).__name__
             except Exception as e:
-                return jsonify({"error": str(e), "error_type": type(e).__name__}), 500
+                results["spline_error"] = str(e)
+
+            results["success"] = "sphere_error" not in results
+            return jsonify(results)
 
         @self.telemetry_app.route("/submit_render_job", methods=["POST"])
         def submit_render_job():
