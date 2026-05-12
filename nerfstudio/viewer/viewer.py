@@ -446,30 +446,88 @@ class Viewer:
                 "label_text": label_text,
             })
 
-        @self.telemetry_app.route("/probe_mesh", methods=["POST"])
-        def probe_mesh():
+        @self.telemetry_app.route("/compute_area", methods=["POST"])
+        def compute_area():
+            from flask import request as flask_request
+            from scipy.spatial import ConvexHull
+
+            data = flask_request.get_json()
+            if data is None:
+                return jsonify({"error": "No JSON body"}), 400
+
+            # Clear existing measurement visualization
+            for h in self.measurement_handles:
+                try:
+                    h.remove()
+                except Exception:
+                    pass
+            self.measurement_handles = []
+
+            positions = data.get("positions")
+            if not positions or len(positions) < 3:
+                return jsonify({"error": "Need at least 3 positions"}), 400
+
+            # Convert viser coords → nerfstudio coords
+            pts_viser = np.array(positions, dtype=float)
+            pts_ns = pts_viser / VISER_NERFSTUDIO_SCALE_RATIO
+
+            # PCA best-fit plane via SVD
+            centroid_ns = pts_ns.mean(axis=0)
+            centered = pts_ns - centroid_ns
+            _, _, Vt = np.linalg.svd(centered, full_matrices=False)
+            basis = Vt[:2]  # shape (2, 3) — two axes spanning the best-fit plane
+
+            # Project to 2D, compute convex hull
+            pts_2d = centered @ basis.T  # shape (N, 2)
             try:
-                vertices = np.array([
-                    [0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
-                    [0.5, 1.0, 0.0], [0.5, 0.5, 1.0]
-                ], dtype=np.float32)
-                faces = np.array([
-                    [0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]
-                ], dtype=np.uint32)
-                handle = self.viser_server.scene.add_mesh_simple(
-                    name="/probe/mesh",
-                    vertices=vertices,
-                    faces=faces,
-                    color=(100, 200, 100),
-                    opacity=0.4,
-                    wireframe=False,
-                )
-                return jsonify({
-                    "success": True,
-                    "handle_type": type(handle).__name__,
-                })
+                hull_2d = ConvexHull(pts_2d)
             except Exception as e:
-                return jsonify({"error": str(e), "error_type": type(e).__name__}), 500
+                return jsonify({"error": f"ConvexHull failed: {str(e)}"}), 400
+
+            # In 2D, ConvexHull.volume is the polygon area
+            area_ns = hull_2d.volume
+
+            # Back-project hull vertices to 3D viser coords for visualization
+            hull_verts_2d = pts_2d[hull_2d.vertices]
+            hull_verts_ns = hull_verts_2d @ basis + centroid_ns
+            hull_verts_viser = hull_verts_ns * VISER_NERFSTUDIO_SCALE_RATIO
+
+            # Get dataparser scale for unit conversion
+            try:
+                dataparser_outputs = self.pipeline.datamanager.train_dataset._dataparser_outputs
+                dataparser_scale = float(dataparser_outputs.dataparser_scale)
+                area_meters = area_ns / (dataparser_scale ** 2) if dataparser_scale else None
+            except Exception:
+                area_meters = None
+
+            label_text = f"{area_meters:.1f} m\u00b2" if area_meters is not None else f"{area_ns:.3f} units\u00b2"
+
+            # Draw closed polygon spline — append first vertex to close the loop
+            closed_verts = np.vstack([hull_verts_viser, hull_verts_viser[0:1]])
+            spline_handle = self.viser_server.scene.add_spline_catmull_rom(
+                name="/measurement/area_outline",
+                positions=closed_verts,
+                color=(100, 220, 100),
+                line_width=2.0,
+            )
+            self.measurement_handles.append(spline_handle)
+
+            # Centroid label
+            centroid_viser = centroid_ns * VISER_NERFSTUDIO_SCALE_RATIO
+            label_handle = self.viser_server.scene.add_label(
+                name="/measurement/area_label",
+                text=label_text,
+                position=tuple(float(v) for v in centroid_viser),
+            )
+            self.measurement_handles.append(label_handle)
+
+            return jsonify({
+                "success": True,
+                "area_meters": area_meters,
+                "area_ns": area_ns,
+                "label_text": label_text,
+                "hull_vertex_count": int(len(hull_2d.vertices)),
+            })
 
         @self.telemetry_app.route("/submit_render_job", methods=["POST"])
         def submit_render_job():
