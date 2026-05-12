@@ -364,9 +364,10 @@ class Viewer:
 
                 safe_name = name.replace(" ", "_").replace("/", "_")
 
+                radius = float(wp.get("radius", 0.15))
                 sphere_handle = self.viser_server.scene.add_icosphere(
                     name=f"/waypoints/{safe_name}/sphere",
-                    radius=0.15,
+                    radius=radius,
                     color=(r, g, b),
                     position=tuple(float(v) for v in position),
                 )
@@ -444,6 +445,31 @@ class Viewer:
                 "distance_ns": dist_ns,
                 "label_text": label_text,
             })
+
+        @self.telemetry_app.route("/probe_mesh", methods=["POST"])
+        def probe_mesh():
+            try:
+                vertices = np.array([
+                    [0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+                    [0.5, 1.0, 0.0], [0.5, 0.5, 1.0]
+                ], dtype=np.float32)
+                faces = np.array([
+                    [0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]
+                ], dtype=np.uint32)
+                handle = self.viser_server.scene.add_mesh_simple(
+                    name="/probe/mesh",
+                    vertices=vertices,
+                    faces=faces,
+                    color=(100, 200, 100),
+                    opacity=0.4,
+                    wireframe=False,
+                )
+                return jsonify({
+                    "success": True,
+                    "handle_type": type(handle).__name__,
+                })
+            except Exception as e:
+                return jsonify({"error": str(e), "error_type": type(e).__name__}), 500
 
         @self.telemetry_app.route("/submit_render_job", methods=["POST"])
         def submit_render_job():
