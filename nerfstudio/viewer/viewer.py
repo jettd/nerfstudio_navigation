@@ -574,9 +574,19 @@ class Viewer:
 
             # Build mesh vertices/faces in viser coords for visualization
             hull_verts_ns = pts_ns[hull_3d.vertices]
-            # Remap simplices indices to hull_verts array
             vert_map = {orig: new for new, orig in enumerate(hull_3d.vertices)}
-            faces = np.array([[vert_map[i] for i in tri] for tri in hull_3d.simplices], dtype=np.uint32)
+            centroid_ns = pts_ns.mean(axis=0)
+
+            # Ensure outward-facing normals (fix backface culling)
+            corrected_faces = []
+            for tri in hull_3d.simplices:
+                v0, v1, v2 = pts_ns[tri[0]], pts_ns[tri[1]], pts_ns[tri[2]]
+                normal = np.cross(v1 - v0, v2 - v0)
+                if np.dot(normal, v0 - centroid_ns) < 0:
+                    corrected_faces.append([vert_map[tri[0]], vert_map[tri[2]], vert_map[tri[1]]])
+                else:
+                    corrected_faces.append([vert_map[tri[0]], vert_map[tri[1]], vert_map[tri[2]]])
+            faces = np.array(corrected_faces, dtype=np.uint32)
             hull_verts_viser = (hull_verts_ns * VISER_NERFSTUDIO_SCALE_RATIO).astype(np.float32)
 
             mesh_handle = self.viser_server.scene.add_mesh_simple(
