@@ -529,6 +529,84 @@ class Viewer:
                 "hull_vertex_count": int(len(hull_2d.vertices)),
             })
 
+        @self.telemetry_app.route("/compute_volume", methods=["POST"])
+        def compute_volume():
+            from flask import request as flask_request
+            from scipy.spatial import ConvexHull
+
+            data = flask_request.get_json()
+            if data is None:
+                return jsonify({"error": "No JSON body"}), 400
+
+            # Clear existing measurement visualization
+            for h in self.measurement_handles:
+                try:
+                    h.remove()
+                except Exception:
+                    pass
+            self.measurement_handles = []
+
+            positions = data.get("positions")
+            if not positions or len(positions) < 4:
+                return jsonify({"error": "Need at least 4 positions"}), 400
+
+            # Convert viser coords → nerfstudio coords
+            pts_viser = np.array(positions, dtype=float)
+            pts_ns = pts_viser / VISER_NERFSTUDIO_SCALE_RATIO
+
+            # 3D convex hull
+            try:
+                hull_3d = ConvexHull(pts_ns)
+            except Exception as e:
+                return jsonify({"error": f"ConvexHull failed: {str(e)}"}), 400
+
+            volume_ns = hull_3d.volume
+
+            # Get dataparser scale for unit conversion
+            try:
+                dataparser_outputs = self.pipeline.datamanager.train_dataset._dataparser_outputs
+                dataparser_scale = float(dataparser_outputs.dataparser_scale)
+                volume_meters = volume_ns / (dataparser_scale ** 3) if dataparser_scale else None
+            except Exception:
+                volume_meters = None
+
+            label_text = f"{volume_meters:.1f} m\u00b3" if volume_meters is not None else f"{volume_ns:.3f} units\u00b3"
+
+            # Build mesh vertices/faces in viser coords for visualization
+            hull_verts_ns = pts_ns[hull_3d.vertices]
+            # Remap simplices indices to hull_verts array
+            vert_map = {orig: new for new, orig in enumerate(hull_3d.vertices)}
+            faces = np.array([[vert_map[i] for i in tri] for tri in hull_3d.simplices], dtype=np.uint32)
+            hull_verts_viser = (hull_verts_ns * VISER_NERFSTUDIO_SCALE_RATIO).astype(np.float32)
+
+            mesh_handle = self.viser_server.scene.add_mesh_simple(
+                name="/measurement/volume_mesh",
+                vertices=hull_verts_viser,
+                faces=faces,
+                color=(100, 180, 255),
+                opacity=0.35,
+                wireframe=False,
+            )
+            self.measurement_handles.append(mesh_handle)
+
+            # Centroid label
+            centroid_ns = pts_ns.mean(axis=0)
+            centroid_viser = centroid_ns * VISER_NERFSTUDIO_SCALE_RATIO
+            label_handle = self.viser_server.scene.add_label(
+                name="/measurement/volume_label",
+                text=label_text,
+                position=tuple(float(v) for v in centroid_viser),
+            )
+            self.measurement_handles.append(label_handle)
+
+            return jsonify({
+                "success": True,
+                "volume_meters": volume_meters,
+                "volume_ns": volume_ns,
+                "label_text": label_text,
+                "hull_vertex_count": int(len(hull_3d.vertices)),
+            })
+
         @self.telemetry_app.route("/submit_render_job", methods=["POST"])
         def submit_render_job():
             from flask import request as flask_request
